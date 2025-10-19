@@ -1,9 +1,11 @@
+// services/tableService.js
 // Generic PostgREST-like helpers via Supabase JS
 import { getUserClient, supabaseAdmin } from '../config/supabase.js';
 
 const byToken = (token) => getUserClient(token);
 
-export const listItems = async (token, table, select='*', queryBuilder=(q)=>q) => {
+/* -------------------- BASIC CRUD (RLS qua user token) -------------------- */
+export const listItems = async (token, table, select = '*', queryBuilder = (q) => q) => {
   const db = byToken(token);
   let q = db.from(table).select(select);
   q = queryBuilder(q);
@@ -33,8 +35,7 @@ export const deleteById = async (token, table, id) => {
   return { ok: true };
 };
 
-// Admin-only ops for tables that require service role (e.g., creating users row)
-// Use with caution; ensure RLS policies!
+/* -------------------- ADMIN TABLE OPS (service role) -------------------- */
 export const adminInsert = async (table, payload) => {
   const { data, error } = await supabaseAdmin.from(table).insert(payload).select().single();
   if (error) throw error;
@@ -51,4 +52,28 @@ export const adminDeleteById = async (table, id) => {
   const { error } = await supabaseAdmin.from(table).delete().eq('id', id);
   if (error) throw error;
   return { ok: true };
+};
+
+/* -------------------- STORAGE HELPERS (service role) -------------------- */
+export const uploadToBucket = async (bucket, path, fileBuffer, contentType, upsert = false) => {
+  const { data, error } = await supabaseAdmin
+    .storage
+    .from(bucket)
+    .upload(path, fileBuffer, { contentType, upsert });
+  if (error) throw error;
+  // data: { path, fullPath? }
+  return data;
+};
+
+export const getPublicUrl = (bucket, path) => {
+  const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path);
+  return data.publicUrl;
+};
+
+export const removeFromBucket = async (bucket, paths) => {
+  // paths: string | string[]
+  const list = Array.isArray(paths) ? paths : [paths];
+  const { data, error } = await supabaseAdmin.storage.from(bucket).remove(list);
+  if (error) throw error;
+  return data;
 };

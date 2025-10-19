@@ -1,13 +1,24 @@
+// routes/images.js
 import { Router } from 'express';
-import * as c from '../controllers/images.js';
+import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
+import * as c from '../controllers/images.js';
 
 const r = Router();
-r.use(requireAuth);
 
-r.get('/', c.list);
-r.post('/', c.create);
-r.patch('/:id', c.update);
-r.delete('/:id', c.remove);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 } // 20MB
+});
+
+// List
+r.get('/', requireAuth, c.list);
+
+// Create (accepts multipart form-data with `file`, OR JSON with `file_url`)
+r.post('/', requireAuth, upload.single('file'), c.create);
+
+// Update / delete
+r.patch('/:id', requireAuth, c.update);
+r.delete('/:id', requireAuth, c.remove);
 
 export default r;
