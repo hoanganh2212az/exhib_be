@@ -1,10 +1,9 @@
 // services/tableService.js
-// Generic PostgREST-like helpers via Supabase JS
 import { getUserClient, supabaseAdmin } from '../config/supabase.js';
 
 const byToken = (token) => getUserClient(token);
 
-/* -------------------- BASIC CRUD (RLS qua user token) -------------------- */
+/* ==================== BASIC CRUD (RLS qua user token) ==================== */
 export const listItems = async (token, table, select = '*', queryBuilder = (q) => q) => {
   const db = byToken(token);
   let q = db.from(table).select(select);
@@ -35,45 +34,40 @@ export const deleteById = async (token, table, id) => {
   return { ok: true };
 };
 
-/* -------------------- ADMIN TABLE OPS (service role) -------------------- */
-export const adminInsert = async (table, payload) => {
-  const { data, error } = await supabaseAdmin.from(table).insert(payload).select().single();
+/* ==================== STORAGE HELPERS (Service role) ==================== */
+// Chỉ kiểm tra tồn tại bucket, KHÔNG tự động đổi public/private để tránh phá config của bạn
+export const ensureBucketExists = async (bucket) => {
+  const { data: buckets, error } = await supabaseAdmin.storage.listBuckets();
   if (error) throw error;
-  return data;
+  return buckets?.some((b) => b.name === bucket);
 };
 
-export const adminUpdateById = async (table, id, patch) => {
-  const { data, error } = await supabaseAdmin.from(table).update(patch).eq('id', id).select().single();
+export const getBucketMeta = async (bucket) => {
+  const { data: buckets, error } = await supabaseAdmin.storage.listBuckets();
   if (error) throw error;
-  return data;
+  return buckets?.find((b) => b.name === bucket) ?? null; // { id, name, public, ... }
 };
 
-export const adminDeleteById = async (table, id) => {
-  const { error } = await supabaseAdmin.from(table).delete().eq('id', id);
-  if (error) throw error;
-  return { ok: true };
-};
-
-/* -------------------- STORAGE HELPERS (service role) -------------------- */
 export const uploadToBucket = async (bucket, path, fileBuffer, contentType, upsert = false) => {
   const { data, error } = await supabaseAdmin
     .storage
     .from(bucket)
     .upload(path, fileBuffer, { contentType, upsert });
   if (error) throw error;
-  // data: { path, fullPath? }
-  return data;
+  return data; // { path, ... }
 };
 
 export const getPublicUrl = (bucket, path) => {
+  // Trả về URL public (chỉ truy cập được nếu bucket Public)
   const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(path);
   return data.publicUrl;
 };
 
-export const removeFromBucket = async (bucket, paths) => {
-  // paths: string | string[]
-  const list = Array.isArray(paths) ? paths : [paths];
-  const { data, error } = await supabaseAdmin.storage.from(bucket).remove(list);
+export const createSignedUrl = async (bucket, path, expiresInSec = 60 * 60 * 24 * 30) => {
+  // Dùng cho bucket Private: URL có hạn
+  const { data, error } = await supabaseAdmin.storage
+    .from(bucket)
+    .createSignedUrl(path, expiresInSec);
   if (error) throw error;
-  return data;
+  return data.signedUrl;
 };

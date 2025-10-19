@@ -1,108 +1,109 @@
 // controllers/images.js
 import * as tb from '../services/tableService.js';
 
-const TABLE = 'images';
+const TABLE  = 'images';
 const BUCKET = 'images';
 
-/**
- * GET /images
- */
+// Chỉ giữ đúng các cột hiện có trong schema images
+const ALLOWED_DB_FIELDS = new Set([
+  'file_url',
+  'width',
+  'height',
+  'title',
+  'description',
+  'room_id',
+  // owner_id, created_at thường do RLS/DEFAULT xử lý; thêm nếu bạn muốn set thủ công
+]);
+
+const pickAllowed = (obj) => {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v !== undefined && v !== null && ALLOWED_DB_FIELDS.has(k)) out[k] = v;
+  }
+  return out;
+};
+
+/** GET /images */
 export const list = async (req, res, next) => {
   try {
     const data = await tb.listItems(req.accessToken, TABLE, '*', (q) => q);
     res.json(data);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 /**
  * POST /images
- * - Nếu có `req.file` (multipart/form-data với field "file"):
- *     1) Upload vào Supabase Storage bucket "images"
- *     2) Lấy public URL -> map vào cột `file_url` (NOT NULL)
- *     3) Insert DB cùng các field text khác trong req.body
- * - Nếu KHÔNG có file nhưng có `req.body.file_url`: insert thẳng DB
+ * - form-data có `file`: upload lên Storage, tạo URL (public hoặc signed tuỳ bucket), insert { file_url, ... }
+ * - hoặc không có file nhưng có `file_url`: insert trực tiếp
  */
 export const create = async (req, res, next) => {
   try {
     const hasFile = !!req.file;
     const hasDirectUrl = !!req.body?.file_url;
 
-    // Trường hợp không có file và cũng không có file_url
     if (!hasFile && !hasDirectUrl) {
-      return res.status(400).json({
-        message: 'Provide a file (field "file") or a non-empty "file_url".'
-      });
+      return res.status(400).json({ message: 'Provide a file ("file") or a "file_url".' });
     }
 
-    // Nếu có file: ưu tiên upload & dùng URL từ Storage
+    // Kiểm tra bucket tồn tại
+    const exists = await tb.ensureBucketExists(BUCKET);
+    if (!exists) {
+      return res.status(400).json({ message: `Storage bucket "${BUCKET}" does not exist.` });
+    }
+
+    // Lấy meta để biết bucket có Public không
+    const meta = await tb.getBucketMeta(BUCKET);
+    const isPublicBucket = !!meta?.public;
+
+    // Trường hợp có upload file
     if (hasFile) {
       const file = req.file;
-
-      const safeName =
-        (file.originalname || 'upload.bin').replace(/[^\w.\-]/g, '_');
+      const safeName = (file.originalname || 'upload.bin').replace(/[^\w.\-]/g, '_');
       const path = `${Date.now()}_${safeName}`;
 
-      // 1) Upload vào Storage (service role)
-      const uploaded = await tb.uploadToBucket(
-        BUCKET,
-        path,
-        file.buffer,
-        file.mimetype,
-        true // upsert
-      );
+      // Upload
+      await tb.uploadToBucket(BUCKET, path, file.buffer, file.mimetype, true);
 
-      // 2) Lấy public URL
-      const publicUrl = tb.getPublicUrl(BUCKET, uploaded.path);
+      // Lấy URL tuỳ theo bucket Public/Private
+      const fileUrl = isPublicBucket
+        ? tb.getPublicUrl(BUCKET, path)
+        : await tb.createSignedUrl(BUCKET, path, 60 * 60 * 24 * 30); // 30 ngày
 
-      // 3) Insert bản ghi DB (đảm bảo có file_url)
-      const payload = {
-        file_url: publicUrl,           // tên cột NOT NULL trong DB
-        storage_path: uploaded.path,   // đổi tên nếu bảng bạn dùng cột khác (vd: path)
-        mime_type: file.mimetype,
-        size: file.size,
-        original_name: file.originalname,
-        ...req.body                    // title, description, room_id, ...
+      // Build payload đúng cột schema
+      const base = {
+        file_url: fileUrl,
+        // width/height nếu bạn muốn set từ client (req.body.width/height)
+        // title, description, room_id từ req.body
       };
+      const payload = pickAllowed({ ...base, ...req.body });
 
       const row = await tb.insertItem(req.accessToken, TABLE, payload);
       return res.status(201).json(row);
     }
 
-    // Nếu không có file nhưng có sẵn file_url -> chèn DB trực tiếp
-    const row = await tb.insertItem(req.accessToken, TABLE, req.body);
+    // Không upload, dùng sẵn file_url
+    const payload = pickAllowed(req.body);
+    if (!payload.file_url) {
+      return res.status(400).json({ message: '"file_url" is required when no file is provided.' });
+    }
+    const row = await tb.insertItem(req.accessToken, TABLE, payload);
     return res.status(201).json(row);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-/**
- * PATCH /images/:id
- */
+/** PATCH /images/:id */
 export const update = async (req, res, next) => {
   try {
-    const data = await tb.updateById(
-      req.accessToken,
-      TABLE,
-      req.params.id,
-      req.body
-    );
+    const patch = pickAllowed(req.body);
+    const data = await tb.updateById(req.accessToken, TABLE, req.params.id, patch);
     res.json(data);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-/**
- * DELETE /images/:id
- */
+/** DELETE /images/:id */
 export const remove = async (req, res, next) => {
   try {
     const data = await tb.deleteById(req.accessToken, TABLE, req.params.id);
     res.json(data);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
