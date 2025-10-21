@@ -9,6 +9,7 @@ export const supabaseAdmin = createClient(config.supabaseUrl, config.serviceRole
 
 // Client theo user (forward Bearer token cho RLS)
 export const getUserClient = (accessToken) => {
+  // Create a client that forwards the user's JWT for RLS
   return createClient(config.supabaseUrl, config.anonKey, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: { persistSession: false }
