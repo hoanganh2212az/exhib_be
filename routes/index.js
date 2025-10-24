@@ -14,15 +14,15 @@ import magazine_items from "./magazine_items.js";
 const r = Router();
 
 r.use("/", auth);
-r.use("/users", users);
-r.use("/rooms", rooms);
-r.use("/room-collaborators", room_collaborators);
-r.use("/images", images);
+r.use("/user", users);
+r.use("/room", rooms);
+r.use("/room-collaborator", room_collaborators);
+r.use("/media", images);
 r.use("/object3d", object3d);
-r.use("/textures", textures);
-r.use("/collections", collections);
-r.use("/collection-items", collection_items);
-r.use("/magazines", magazines);
-r.use("/magazine-items", magazine_items);
+r.use("/texture", textures);
+r.use("/collection", collections);
+r.use("/collection-item", collection_items);
+r.use("/magazine", magazines);
+r.use("/magazine-item", magazine_items);
 
 export default r;
